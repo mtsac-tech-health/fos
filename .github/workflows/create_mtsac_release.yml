@@ -1,0 +1,137 @@
+# TODO: Add the logic for the patches when they are done.
+
+name: Create Release for MtSAC FOG
+
+on:
+  workflow_dispatch: 
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build_kernel_x64:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply MtSAC patches
+        run: |
+          # run logic to apply patches from patch/mtsac/kernel...
+
+      - name: Build x64 kernel
+        run: ./build.sh --install-dep -nka x64
+
+      - name: Rename kernel for mtsac
+        run: |
+          mv dist/bzImage dist/bzImage_mtsac
+          mv dist/bzImage.sha256 dist/bzImage_mtsac.sha256
+      
+      - name: Run sha256 checksum
+        run: |
+          cd dist
+          sha256sum -c ./*.sha256
+          if [[ $? -ne 0 ]]; then exit 1; fi
+      
+      - name: Save distribution files
+        uses: actions/upload-artifact@v4
+        with:
+          name: distribution-files-kernel-x64
+          path: dist
+          retention-days: 1
+
+  build_initrd_x64:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply MtSAC patches
+        run: |
+          # run logic to apply patches from patch/mtsac/init...
+
+      - name: Build x64 initrd
+        run: ./build.sh --install-dep -nfa x64
+      
+      - name: Rename init for mtsac
+        run: |
+          mv dist/init.xz dist/init_mtsac.xz
+          mv dist/init.xz.sha256 dist/init_mtsac.xz.sha256
+      
+      - name: Run sha256 checksum
+        run: |
+          cd dist
+          sha256sum -c ./*.sha256
+          if [[ $? -ne 0 ]]; then exit 1; fi
+      
+      - name: Save distribution files
+        uses: actions/upload-artifact@v4
+        with:
+          name: distribution-files-initrd-x64
+          path: dist
+          retention-days: 1
+
+      - name: Save log file
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Buildroot-logs-x64
+          path: fssourcex64/buildrootx64.log
+          retention-days: 30
+
+  release:
+    needs: 
+      [
+        build_kernel_x64,
+        build_initrd_x64,
+      ]
+
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download distribution files
+        uses: actions/download-artifact@v4
+        with:
+          pattern: distribution-files-*
+          merge-multiple: true
+          path: distribution-files
+
+      - name: Set release name variable
+        run: |
+          echo "RELEASE_NAME=Latest from $(date '+%Y-%m-%d')" >> $GITHUB_ENV
+      
+      - name: Set tag name variable
+        run: |
+          echo "TAG_NAME=$(date '+%Y%m%d')" >> $GITHUB_ENV
+
+      - name: Get Linux Kernel version from build.sh
+        run: |
+          echo "LINUX_KERNEL_VER=$(cat build.sh | sed -n -e 's/^.*KERNEL_VERSION=//p' | cut -d\' -f 2)" >> $GITHUB_ENV
+
+      - name: Get Buildroot version from build.sh
+        run: |
+          echo "BUILDROOT_VER=$(cat build.sh | sed -n -e 's/^.*BUILDROOT_VERSION=//p' | cut -d\' -f 2)" >> $GITHUB_ENV
+  
+
+      - name: Run sha256 checksum on all files
+        run: |
+          cd distribution-files
+          sha256sum -c ./*.sha256
+          if [[ $? -ne 0 ]]; then exit 1; fi
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ env.RELEASE_NAME }}
+          body: |
+            Linux kernel ${{ env.LINUX_KERNEL_VER }}
+            Buildroot ${{ env.BUILDROOT_VER }}
+          tag_name: ${{ env.TAG_NAME }}
+          files: |
+            distribution-files/bzImage_mtsac
+            distribution-files/bzImage_mtsac.sha256
+            distribution-files/init_mtsac.xz
+            distribution-files/init_mtsac.xz.sha256
