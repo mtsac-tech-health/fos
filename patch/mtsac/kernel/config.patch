@@ -1,0 +1,17 @@
+diff --git a/configs/kernelx64.config b/configs/kernelx64.config
+index 7375681..066b980 100644
+--- a/configs/kernelx64.config
++++ b/configs/kernelx64.config
+@@ -23,6 +23,12 @@ CONFIG_IRQ_WORK=y
+ CONFIG_BUILDTIME_TABLE_SORT=y
+ CONFIG_THREAD_INFO_IN_TASK=y
+ 
++#
++# HP UEFI Module
++#
++CONFIG_HPUEFI=y
++# end of HP UEFI Module
++
+ #
+ # General setup
+ #
