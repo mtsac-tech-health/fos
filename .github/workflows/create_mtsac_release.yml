@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Create patches for Mt. SAC
-        run: ./create_mtsac_patches.sh
+        run: ./create_patch_files.sh
 
       - name: Save patches
         uses: actions/upload-artifact@v4
