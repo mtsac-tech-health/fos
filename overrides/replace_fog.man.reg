@@ -1,0 +1,387 @@
+#!/bin/bash
+. /usr/share/fog/lib/funcs.sh
+
+declare -a infoToSendToFOG
+
+clearScreen
+displayBanner
+disks=""
+disk=""
+hd=""
+getHardDisk
+sysman=""
+sysproduct=""
+sysversion=""
+sysserial=""
+sysuuid=""
+systype=""
+biosversion=""
+biosvendor=""
+biosdate=""
+mbman=""
+mbproductname=""
+mbversion=""
+mbserial=""
+mbasset=""
+cpuman=""
+cpuversion=""
+cpucurrent=""
+cpumax=""
+mem=""
+hdinfo=""
+caseman=""
+casever=""
+caseserial=""
+caseasset=""
+sysman64=""
+sysproduct64=""
+sysversion64=""
+sysserial64=""
+sysuuid64=""
+systype64=""
+biosversion64=""
+biosvendor64=""
+biosdate64=""
+mbman64=""
+mbproductname64=""
+mbversion64=""
+mbserial64=""
+mbasset64=""
+cpuman64=""
+cpuversion64=""
+cpucurrent64=""
+cpumax64=""
+mem64=""
+hdinfo64=""
+caseman64=""
+casever64=""
+caseserial64=""
+caseasset64=""
+dots "Using disk device"
+echo $hd
+echo " * Starting host registration"
+
+mac=$(getMACAddresses | base64)
+echo -n " * Using MAC Address - "
+echo $mac | base64 --decode
+infoToSendToFOG+=("   - MAC Address: $(echo $mac | base64 --decode)")
+
+sysuuid=$(dmidecode -s system-uuid)
+sysuuid=${sysuuid,,}
+sysuuid=$(echo $sysuuid | base64)
+exists=$(curl -Lks --data "sysuuid=${sysuuid}&mac=$mac" ${web}service/man.hostexists.php 2>/dev/null)
+checkAndSet() {
+    local testvar="$1"
+    local onlynum="$2"
+    [[ -z $testvar ]] && return
+    if [[ $onlynum =~ [Tt][Rr][Uu][Ee] && $testvar =~ ^[0-9]+$ ]]; then
+        echo $testvar | base64
+    elif [[ $testvar =~ ^[0-9,]+$ ]]; then
+        echo $testvar | base64
+    else
+        return
+    fi
+}
+setIDs() {
+    local varVar="$1"
+    local str="$2"
+    local csvstyle="$3"
+    local dummy="$4"
+    local max="$5"
+    local res=""
+    local url=""
+    local oIFS=$IFS
+    local line=""
+    while [[ -z ${!varVar} ]]; do
+        [[ $csvstyle =~ [Tt][Rr][Uu][Ee] ]] && echo -n "    Enter the $str IDs separated with , to associate with computer (? for listing): " || echo -n "    Enter the $str ID to associate with computer (? for listing): "
+        read dummy
+        dummy=$(echo $dummy | sed -e 's/^,//' -e 's/,$//') ## Remove leading and trailing commas
+        case $dummy in
+            [?])
+                url="${web}service/${str}listing.php"
+                res=$(echo -e $(curl -ks $url 2>/dev/null))
+                i=0
+                IFS=$'\n'
+                for line in $res; do
+                    let i+=1
+                    echo $line
+                    if [[ $i -eq $max ]]; then
+                        [[ $csvstyle =~ [Tt][Rr][Uu][Ee] ]] && echo -n "    Press [Enter] to proceed or enter the $str IDs separated with , to associate with computer: " || echo -n "    Press [Enter] to proceed or enter the $str ID to associate with computer: "
+                        read dummy
+                        case $dummy in
+                            [?]|"")
+                                i=0
+                                continue
+                                ;;
+                        esac
+                        case $csvstyle in
+                            [Tt][Rr][Uu][Ee])
+                                [[ $dummy =~ ^[0-9,]+$ ]] && printf -v "$varVar" $(checkAndSet $dummy) || setIDs "$varVar" "$str" "$csvstyle" "$dummy" "$max"
+                                break
+                                ;;
+                            *)
+                                [[ $dummy =~ ^[0-9]+$ ]] && printf -v "$varVar" $(checkAndSet $dummy "true") || setIDs "$varVar" "$str" "$csvstyle" "$dummy" "$max"
+                                break
+                                ;;
+                        esac
+                        i=0
+                        dummy=$(echo $dummy | sed -e 's/^,//' -e 's/,$//') ## Remove leading and trailing commas
+                    fi
+                done
+                ;;
+            ""|0)
+                ## If the user enters nothing or 0, set the variable to 0
+                ## This is used to clear the variable if the user doesn't want to associate anything
+                ## Example: imageid=0
+                printf -v "$varVar" 0
+                ;;
+            *)
+                dummy=$(echo $dummy | sed -e 's/^,//' -e 's/,$//') ## Remove leading and trailing commas
+                [[ -z $dummy ]] && setIDs "$varVar" "$str" "$csvstyle" "$dummy" "$max"
+                case $csvstyle in
+                    [Tt][Rr][Uu][Ee])
+                        [[ $dummy =~ ^[0-9,]+$ ]] && printf -v "$varVar" $(checkAndSet $dummy) || setIDs "$varVar" "$str" "$csvstyle" "$dummy" "$max"
+                        ;;
+                    *)
+                        [[ $dummy =~ ^[0-9]+$ ]] && printf -v "$varVar" $(checkAndSet $dummy "true") || setIDs "$varVar" "$str" "$csvstyle" "$dummy" "$max"
+                        ;;
+                esac
+                ;;
+        esac
+    done
+    IFS=$oIFS
+}
+[[ $exists != "#!ok" ]] && handleError "Unable to register host: $exists ($0)\n   Args Passed: $*"
+host=""
+ip=""
+productKey=""
+imageid=""
+primaryuser=""
+other1=""
+other2=""
+blImage=""
+blDoAddGroup=""
+blDoAddSnapin=""
+keyEnter=""
+blDoAD=""
+
+res=""
+confirmHostname=""
+while [[ $res != "#!ok" ]] || [[ $confirmHostname == "n" ]]; do
+    confirmHostname=""
+
+    echo -n " * Enter hostname for this computer: "
+    read host
+
+    if [[ ${#host} -gt 15 ]]; then
+        host=${host:0:15}
+        echo " | Truncated to 15 characters: $host"
+        usleep 2000000
+    fi
+
+    echo -n "  | Confirm hostname: '$host' (Y/n): "
+    read confirmHostname
+
+    if [[ $confirmHostname =~ [Nn] ]] || [[ $confirmHostname =~ [Nn][Oo] ]]; then
+        confirmHostname="n"
+        continue
+    fi
+
+    host=$(echo $host | base64)
+    res=$(curl -Lks --data "host=$host" ${web}service/hostnameloop.php 2>/dev/null)
+    [[ $res != "#!ok" ]] && echo "$res"
+done
+infoToSendToFOG+=("   - Hostname: $(echo $host | base64 --decode)")
+
+askme=""
+manualRegistration=""
+while [[ -z $askme ]]; do
+    echo -n "    Are you using persistent groups? (Y/n) "
+    read askme
+    case $askme in
+        [Yy]|[Yy][Ee][Ss]|"")
+            setIDs "groupid" "group" "true" "" 20  ## TODO: fix this so that it doesn't ask for multiple groups, since there should only be one persistent group
+            group64=$groupid
+            askme="Y"
+            infoToSendToFOG+=("   - Persistent Group ID: $(echo $group64 | base64 --decode)")
+            ;;
+        [Nn]|[Nn][Oo])
+            manualRegistration="Y"
+            askme="N"
+            ;;
+        *)
+            askme=""
+            echo " * Invalid input, please try again"
+            ;;
+    esac
+done
+
+
+if [[ $manualRegistration == "Y" ]]; then
+
+    imageid=""
+    setIDs "imageid" "image" "" "" 20
+    infoToSendToFOG+=("   - Image ID: $(echo $imageid | base64 --decode)")
+
+    askme=""
+    while [[ -z $askme ]]; do
+        echo -n "    Would you like to associate this host with groups? (y/N) "
+        read askme
+        case $askme in
+            [Nn]|[Nn][Oo]|"")
+                askme="N"
+                ;;
+            [Yy]|[Yy][Ee][Ss])
+                setIDs "groupid" "group" "true" "" 20
+                group64=$groupid
+                infoToSendToFOG+=("   - Group ID(s): $(echo $group64 | base64 --decode)")
+                ;;
+            *)
+                askme=""
+                echo " * Invalid input, please try again"
+                ;;
+        esac
+    done
+
+    askme=""
+    while [[ -z $askme ]]; do
+        echo -n "    Would you like to associate this host with snapins? (y/N) "
+        read askme
+        case $askme in
+            [Nn]|[Nn][Oo]|"")
+                askme="N"
+                ;;
+            [Yy]|[Yy][Ee][Ss])
+                setIDs "snapinid" "snapin" "true" "" 20
+                snapin64=$snapinid
+                infoToSendToFOG+=("   - Snapin ID(s): $(echo $snapin64 | base64 --decode)")
+                ;;
+            *)
+                askme=""
+                echo " * Invalid input, please try again"
+                ;;
+        esac
+    done
+
+fi
+
+
+echo -n " * Enter the username of the primary user for this computer or department name for labs: "
+read primaryuser
+infoToSendToFOG+=("   - Primary User: $primaryuser")
+primaryuser=$(echo $primaryuser | base64)
+
+decodedHostName=$(echo $host | base64 --decode)
+if [[ $decodedHostName =~ 0[0-9]{5}$ ]]; then
+    echo -n " * Use the asset tag from the computer name? Asset tag: ${BASH_REMATCH[0]} (Y/n) "
+    read askme
+    case $askme in
+        [Nn]|[Nn][Oo])
+            echo -n " * Enter the asset tag for this computer: "
+            read other1
+            infoToSendToFOG+=("   - Asset Tag: $other1")
+            ;;
+        [Yy]|[Yy][Ee][Ss]|""|*)
+            other1=${BASH_REMATCH[0]}
+            infoToSendToFOG+=("   - Asset Tag: $other1")
+            ;;
+    esac
+else
+    echo -n " * Enter the asset tag for this computer: "
+    read other1
+    infoToSendToFOG+=("   - Asset Tag: $other1")
+fi
+other1=$(echo $other1 | base64)
+
+echo -n " * Enter the other tag #2 for this computer: "
+read other2
+infoToSendToFOG+=("   - Other Tag #2: $other2")
+other2=$(echo $other2 | base64)
+
+echo " * You entered all required information."
+echo ""
+echo ""
+echo " * The following information will be sent to the FOG server:"
+
+for i in "${infoToSendToFOG[@]}"; do
+    echo "$i"
+done
+
+echo ""
+echo -n " * Confirm this information is correct? (Y/n) "
+informationIsCorrect=""
+while [[ -z $informationIsCorrect ]]; do
+    read informationIsCorrect
+    case $informationIsCorrect in
+        [Nn]|[Nn][Oo])
+            echo ""
+            echo ""
+            echo " --- REGISTRATION CANCELLED --- "
+            echo " * Restarting registration process."
+            usleep 5000000
+            exec "$0"
+            ;;
+        [Yy]|[Yy][Ee][Ss]|"")
+            informationIsCorrect="Y"
+            ;;
+        *)
+            informationIsCorrect=""
+            echo " * Invalid input, please try again"
+            ;;
+    esac
+done
+
+askme=""
+while [[ -z $askme ]]; do
+    echo -n "    Would you like to deploy image to this computer now? (y/N) "
+    read askme
+    case $askme in
+        [Nn]|[Nn][Oo]|"")
+            askme="N"
+            ;;
+        [Yy]|[Yy][Ee][Ss])
+            tmp=""
+            ret=""
+            retry=3
+            while [[ $ret != "#!ok" && ! $retry -eq 0 ]]; do
+                echo " * Enter FOG GUI Username and Password"
+                echo -n "    Username: "
+                read username
+                echo -n "    Password: "
+                read -s password
+                user64=$(echo $username | tr -d '\012' | base64)
+                pass64=$(echo $password | tr -d '\012' | base64)
+                ret=$(curl -Lks --data "sysuuid=${sysuuid}&mac=$mac&username=$user64&password=$pass64" ${web}service/checkcredentials.php 2>/dev/null)
+                case $ret in
+                    '#!ok')
+                        echo
+                        echo " * This host will reboot and deployment will start!"
+                        ret=$tmp
+                        realdoimage=$(echo -n 1 | base64)
+                        break
+                        ;;
+                    '#!il')
+                        echo
+                        echo " * Error: Invalid Login! ($retry remaining)"
+                        let retry-=1
+                        ;;
+                esac
+            done
+            askme="Y"
+            ;;
+        *)
+            askme=""
+            echo " * Invalid input, please try again"
+            ;;
+    esac
+done
+
+dots "Attempting to register host"
+res=""
+while [[ -z $res ]]; do
+    res=$(curl -Lks --data "sysuuid=${sysuuid}&mac=$mac&advanced=$(echo -n 1 | base64)&host=$host&imageid=$imageid&primaryuser=$primaryuser&other1=$other1&other2=$other2&doimage=$realdoimage&doad=$blDoAD&location=$location64&username=$user64&password=$pass64&groupid=$group64&snapinid=$snapin64&productKey=$productKey" ${web}service/auto.register.php 2>/dev/null)
+    echo "$res"
+    usleep 4000000
+done
+. /bin/fog.inventory
+usleep 2000000
