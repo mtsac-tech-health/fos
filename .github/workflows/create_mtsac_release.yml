@@ -43,7 +43,7 @@ jobs:
         run: ls -la
       
       - name: ls mtsac_patches
-        run: ls -la mtsac_patches
+        run: ls -la mtsac_patches/mtsac_patches
       
       - name: Apply patches
         run: ./apply_patches.sh
