@@ -30,20 +30,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: ls
-        run: ls -la
-
       - name: Download patch files
         uses: actions/download-artifact@v4
         with:
           pattern: mtsac_patches
           path: ./
-      
-      - name: ls
-        run: ls -la
-      
-      - name: ls mtsac_patches
-        run: ls -la mtsac_patches
       
       - name: Apply patches
         run: ./apply_patches.sh
@@ -79,8 +70,8 @@ jobs:
       - name: Download patch files
         uses: actions/download-artifact@v4
         with:
-          pattern: mtsac_patches/*
-          path: mtsac_patches
+          pattern: mtsac_patches
+          path: ./
       
       - name: Apply patches
         run: ./apply_patches.sh
