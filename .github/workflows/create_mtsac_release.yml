@@ -36,8 +36,8 @@ jobs:
       - name: Download patch files
         uses: actions/download-artifact@v4
         with:
-          pattern: mtsac_patches/*
-          path: mtsac_patches
+          pattern: mtsac_patches
+          path: ./
       
       - name: ls
         run: ls -la
