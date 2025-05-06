@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name:
+      - name: ls
         run: ls -la
 
       - name: Download patch files
@@ -38,6 +38,9 @@ jobs:
         with:
           pattern: mtsac_patches
           path: mtsac_patches
+      
+      - name: ls
+        run: ls -la
       
       - name: Apply patches
         run: ./apply_patches.sh
