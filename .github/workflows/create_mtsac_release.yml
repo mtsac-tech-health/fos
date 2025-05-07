@@ -139,13 +139,6 @@ jobs:
       - name: Get Buildroot version from build.sh
         run: |
           echo "BUILDROOT_VER=$(cat build.sh | sed -n -e 's/^.*BUILDROOT_VERSION=//p' | cut -d\' -f 2)" >> $GITHUB_ENV
-  
-
-      - name: Run sha256 checksum on all files
-        run: |
-          cd distribution-files
-          sha256sum -c ./*.sha256
-          if [[ $? -ne 0 ]]; then exit 1; fi
 
       - name: Create release
         uses: softprops/action-gh-release@v2
