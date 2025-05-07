@@ -42,16 +42,16 @@ jobs:
       - name: Build x64 kernel
         run: ./build.sh --install-dep -nka x64
 
-      - name: Rename kernel for mtsac
-        run: |
-          mv dist/bzImage dist/bzImage_mtsac
-          mv dist/bzImage.sha256 dist/bzImage_mtsac.sha256
-      
       - name: Run sha256 checksum
         run: |
           cd dist
           sha256sum -c ./*.sha256
           if [[ $? -ne 0 ]]; then exit 1; fi
+
+      - name: Rename kernel for mtsac
+        run: |
+          mv dist/bzImage dist/bzImage_mtsac
+          mv dist/bzImage.sha256 dist/bzImage_mtsac.sha256
       
       - name: Save distribution files
         uses: actions/upload-artifact@v4
@@ -79,16 +79,16 @@ jobs:
       - name: Build x64 initrd
         run: ./build.sh --install-dep -nfa x64
       
-      - name: Rename init for mtsac
-        run: |
-          mv dist/init.xz dist/init_mtsac.xz
-          mv dist/init.xz.sha256 dist/init_mtsac.xz.sha256
-      
       - name: Run sha256 checksum
         run: |
           cd dist
           sha256sum -c ./*.sha256
           if [[ $? -ne 0 ]]; then exit 1; fi
+      
+      - name: Rename init for mtsac
+        run: |
+          mv dist/init.xz dist/init_mtsac.xz
+          mv dist/init.xz.sha256 dist/init_mtsac.xz.sha256
       
       - name: Save distribution files
         uses: actions/upload-artifact@v4
