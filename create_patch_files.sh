@@ -30,6 +30,10 @@ function configs_patch() {
     # Add the hpuefi config to the kernel .config
     echo "CONFIG_HPUEFI=y" >> configs/kernelx64.config
 
+    # Add Nushell and requirements to the fs config
+    sed -i 's/# BR2_PACKAGE_NUSHELL is not set/BR2_PACKAGE_NUSHELL=y/g' configs/fsx64.config
+    sed -i 's/# BR2_PACKAGE_HOST_RUSTC is not set/BR2_PACKAGE_HOST_RUSTC=y\n# BR2_PACKAGE_HOST_RUST is not set\nBR2_PACKAGE_HOST_RUST_BIN=y/g' configs/fsx64.config
+
     # Git add changes for diff
     git add ./configs
 
@@ -38,6 +42,7 @@ function configs_patch() {
 
     # Undo git add for other patches
     git reset configs/kernelx64.config
+    git reset configs/fsx64.config
 }
 
 function kernel_patch() {
