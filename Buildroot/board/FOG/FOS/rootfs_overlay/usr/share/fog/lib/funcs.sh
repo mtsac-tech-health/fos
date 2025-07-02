@@ -1476,66 +1476,69 @@ getPartitions() {
     [[ -z $disk ]] && handleError "No disk found (${FUNCNAME[0]})\n   Args Passed: $*"
     parts=$(lsblk -I 3,8,9,179,202,253,259 -lpno KNAME,TYPE $disk | awk '{if ($2 ~ /part/ || $2 ~ /md/) print $1}' | sort -V | uniq)
 }
+normalize() {
+    echo "$1" | xargs | tr '[:upper:]' '[:lower:]'
+}
 # Gets the hard drive on the host
 # Note: This function makes a best guess
 getHardDisk() {
     hd=""
     disks=""
-    local devs=$(lsblk -dpno KNAME -I 3,8,9,179,202,253,259 | uniq | sort -V)
+    local devs=$(lsblk -dpno KNAME,SIZE -I 3,8,9,179,202,253,259 | awk '$2 != "0B" { print $1 }' | sort -uV)
+
     if [[ -n $fdrive ]]; then
-        for spec in $(echo $fdrive | tr "," "\n"); do
+        found_match=0
+        for spec in $(echo "$fdrive" | tr "," "\n"); do
+            matched=0
             for dev in $devs; do
-                if [[ "x$spec" = "x$dev" ||
-                      "x$spec" = "x$(trim $(blockdev --getsize64 $dev))" ||
-                      "x$spec" = "x$(trim $(lsblk -pdno SERIAL $dev))" ||
-                      "x$spec" = "x$(trim $(lsblk -pdno WWN $dev))" ]]; then
-                    disks=$(echo "$disks $dev")
-                    escaped_dev=$(echo $dev | sed -e 's/[]"\/$&*.^|[]/\\&/g')
-                    devs=$(echo ${devs} | sed "s/[[:space:]]*${escaped_dev}[[:space:]]*/ /")
+                dev_trimmed=$(echo "$dev" | xargs)
+                spec_lc=$(normalize "$spec")
+                size=$(blockdev --getsize64 "$dev_trimmed" 2>/dev/null | normalize)
+                uuid=$(blkid -s UUID -o value "$dev_trimmed" 2>/dev/null | normalize)
+                read -r serial wwn <<< "$(lsblk -pdno SERIAL,WWN "$dev_trimmed" 2>/dev/null | normalize)"
+                if [[ -n $isdebug ]];; then
+                    echo "Comparing spec='$spec_lc' with:"
+                    echo "  dev=$dev"
+                    echo "  size=$size"
+                    echo "  serial=$serial"
+                    echo "  wwn=$wwn"
+                    echo "  uuid=$uuid"
+                fi
+                if [[ "x$spec" = "x$dev_trimmed" ||
+                      "x$spec_lc" = "x$(trim $(blockdev --getsize64 "$dev_trimmed"))" ||
+                      "x$spec_lc" = "x$wwn" ||
+                      "x$spec_lc" = "x$serial" ||
+                      "x$spec_lc" = "x$uuid" ]]; then
+                    matched=1
+                    found_match=1
+                    disks="${disks} $dev"
+                    # Remove matched dev from devs to avoid duplicates
+                    escaped_dev=$(echo "$dev" | sed -e 's/[]"\/$&*.^|[]/\\&/g')
+                    devs=$(echo "$devs" | sed "s/[[:space:]]*${escaped_dev}[[:space:]]*/ /")
                     break
-                else
-                    p1="$(trim $(blockdev --getsize64 $dev))"
-                    p2="$(trim $(lsblk -pdno SERIAL $dev))"
-                    p3="$(trim $(lsblk -pdno WWN $dev))"
                 fi
             done
+            if [[ $matched -eq 0 ]]; then
+                echo "WARNING: Drive spec '$spec' does not match any available device. Ignoring." >&2
+            fi
         done
-        disks=$( echo "${disks} ${devs}" | xargs)
+
+        if [[ $found_match -eq 0 ]]; then
+            handleError "Fatal Error: No valid drives found from 'Host Primary Disk'='$fdrive'. Please ensure the device exists and is not 0 bytes. ($0)"
+        fi
+
+        disks=$(echo "${disks} ${devs}" | xargs)
     elif [[ -r ${imagePath}/d1.size && -r ${imagePath}/d2.size ]]; then
-        disks=$(echo ${devs})
-        disk_count=$(echo "$disks" | wc -w)
-        disk_array=()
-        size_information=$(cat ${imagePath}/*.size 2>/dev/null)
-        for disk_number in $(seq 1 $disk_count); do
-            disk=$(echo $disks | cut -d' ' -f $disk_number)
-            if [[ -n "${size_information}" ]]; then
-                disk_size=$(blockdev --getsize64 $disk)
-                image_matching_size=$(echo ${size_information} | grep -o "[0-9][0-9]*:${disk_size}" | head -1 | cut -d':' -f1)
-                if [[ -n $image_matching_size && $image_matching_size -gt 0 && $image_matching_size -le 32 ]]; then
-                    disk_number=$image_matching_size
-                else
-                    closest_sized_image=$(echo -e "${size_information}\nx:${disk_size}" | sort -t':' -k2 -n | grep -B1 "${disk_size}" | head -1 | cut -d':' -f1 )
-                    if [[ -n $closest_sized_image && $closest_sized_image -gt 0 && $closest_sized_image -le 32 ]]; then
-                        disk_number=$closest_sized_image
-                    fi
-                fi
-                size_information=$(echo ${size_information} | sed "s/[[:space:]]*[0-9][0-9]*:${disk_size}[[:space:]]*//")
-            fi
-            echo "${disk_array[@]}" | grep -q "$disk"
-            if [[ $? -eq 0 ]]; then
-                handleError "Fatal Error: Disk size information would lead to overwrite the already cloned disk $disk. ($0)"
-            fi
-            disk_array[$disk_number]=$disk
-        done
-        disks=${disk_array[@]}
+        disks=$(echo "$devs")
     else
-        disks=$(echo ${devs})
+        # Auto-select the largest available drive if no fdrive and no imagePath match
+        hd=$(echo "$devs" | while read line; do echo "$(blockdev --getsize64 "$line") $line"; done | sort -n | tail -1 | cut -d' ' -f2)
+        [[ -z $hd ]] && handleError "Could not determine a suitable disk automatically. No drives available? ($0)"
+        disks="$hd"
     fi
 
-    for hd in $disks; do
-        break
-    done
-    [[ -z $hd || -z $disks ]] && handleError "Cannot find hard disk(s) (${FUNCNAME[0]})\n   Args Passed: $*"
+    # Set primary hard disk
+    hd=$(echo "$disks" | awk '{print $1}')
 }
 # Finds the hard drive info and set's up the type
 findHDDInfo() {
