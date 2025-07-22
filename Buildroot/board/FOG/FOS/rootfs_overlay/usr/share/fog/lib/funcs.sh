@@ -1496,7 +1496,7 @@ getHardDisk() {
                 size=$(blockdev --getsize64 "$dev_trimmed" 2>/dev/null | normalize)
                 uuid=$(blkid -s UUID -o value "$dev_trimmed" 2>/dev/null | normalize)
                 read -r serial wwn <<< "$(lsblk -pdno SERIAL,WWN "$dev_trimmed" 2>/dev/null | normalize)"
-                if [[ -n $isdebug ]];; then
+                if [[ -n $isdebug ]]; then
                     echo "Comparing spec='$spec_lc' with:"
                     echo "  dev=$dev"
                     echo "  size=$size"
@@ -1513,7 +1513,7 @@ getHardDisk() {
                     found_match=1
                     disks="${disks} $dev"
                     # Remove matched dev from devs to avoid duplicates
-                    escaped_dev=$(echo "$dev" | sed -e 's/[]"\/$&*.^|[]/\\&/g')
+                    escaped_dev=$(echo "$dev" | sed -e 's/[]"$&*.^|[]/\\&/g')
                     devs=$(echo "$devs" | sed "s/[[:space:]]*${escaped_dev}[[:space:]]*/ /")
                     break
                 fi
