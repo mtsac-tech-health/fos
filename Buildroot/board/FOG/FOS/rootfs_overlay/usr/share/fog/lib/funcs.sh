@@ -1501,39 +1501,47 @@ resolve_path() {
 getHardDisk() {
     hd=""
     disks=""
-    # Get valid devices (filter out 0B disks) once
+
+    # Get valid devices (filter out 0B disks) once, keeping lsblk enumeration order
     local devs
-    devs=$(lsblk -dpno KNAME,SIZE -I 3,8,9,179,202,253,259 | awk '$2 != "0B" { print $1 }' | sort -uV)
+    devs=$(lsblk -dpno KNAME,SIZE -I 3,8,9,179,202,253,259 | awk '$2 != "0B" && !seen[$1]++ { print $1 }')
 
     if [[ -n $fdrive ]]; then
         local found_match=0
         for spec in ${fdrive//,/ }; do
-            local spec_resolved
+            local spec_resolved spec_norm spec_normalized matched
             spec_resolved=$(resolve_path "$spec")
-            local spec_norm
-            spec_norm=$(normalize "$spec_resolved")
-            local matched=0
-            local spec_normalized
             spec_normalized=$(normalize "$spec")
+            matched=0
 
             for dev in $devs; do
                 local size uuid serial wwn
                 size=$(blockdev --getsize64 "$dev" | normalize)
                 uuid=$(blkid -s UUID -o value "$dev" 2>/dev/null | normalize)
-                read -r serial wwn <<< "$(lsblk -pdno SERIAL,WWN "$dev" 2>/dev/null | normalize)"
+                # Grab SERIAL and WWN safely (handles blanks and spacing)
+                local kv serial_raw wwn_raw
+                kv="$(lsblk -pdPno SERIAL,WWN "$dev" 2>/dev/null)" || kv=""
+                serial_raw="$(sed -n 's/.*SERIAL="\([^"]*\)".*/\1/p' <<<"$kv")"
+                wwn_raw="$(sed -n 's/.*WWN="\([^"]*\)".*/\1/p' <<<"$kv")"
+
+                serial="$(normalize "$serial_raw")"
+                wwn="$(normalize "$wwn_raw")"
 
                 [[ -n $isdebug ]] && {
                     echo "Comparing spec='$spec' (resolved: '$spec_resolved') with dev=$dev"
                     echo "  size=$size serial=$serial wwn=$wwn uuid=$uuid"
                 }
-                if [[ "x$spec_resolved" == "x$dev" || "x$spec_normalized" == "x$size" ||
-                      "x$spec_normalized" == "x$wwn" || "x$spec_normalized" == "x$serial" ||
+                if [[ "x$spec_resolved" == "x$dev" || \
+                      "x$spec_normalized" == "x$size" || \
+                      "x$spec_normalized" == "x$wwn" || \
+                      "x$spec_normalized" == "x$serial" || \
                       "x$spec_normalized" == "x$uuid" ]]; then
                     [[ -n $isdebug ]] && echo "Matched spec '$spec' to device '$dev' (size=$size, serial=$serial, wwn=$wwn, uuid=$uuid)"
                     matched=1
                     found_match=1
                     disks="$disks $dev"
-                    devs=${devs// $dev/}   # remove matched dev
+                    # remove matched dev from the pool
+                    devs="$(echo " $devs " | sed "s# $dev # #g; s/^ *//; s/ *$//")"
                     break
                 fi
             done
@@ -1545,11 +1553,77 @@ getHardDisk() {
 
         disks=$(echo "$disks $devs" | xargs)   # add unmatched devices for completeness
 
-    elif [[ -r ${imagePath}/d1.size && -r ${imagePath}/d2.size ]]; then
+    elif [[ "x$imgType" == "xmpa" ]]; then
+        # Multi-disk image: keep enumeration order
         disks="$devs"
+        if [[ "x$type" == "xdown" ]]; then
+            # Expected disk sizes from image (d1.size, d2.size, ...)
+            local sizefiles expected_sizes=()
+            sizefiles=$(ls -1 "${imagePath}"/d*.size 2>/dev/null | sort -V)
+
+            if [[ -n "$sizefiles" ]]; then
+                local f exp
+                for f in $sizefiles; do
+                    # file format: d1: 123456789
+                    exp="$(awk -F: '{gsub(/[[:space:]]/,"",$2); print $2}' "$f")"
+                    [[ -n "$exp" ]] && expected_sizes+=("$exp")
+                done
+
+                # Actual disks (keep lsblk order)
+                local actual_disks=()
+                for d in $devs; do actual_disks+=("$d"); done
+
+                # Build mapping in d1,d2,... order
+                local mapped=() used=" "
+                local i match candidates
+
+                for i in "${!expected_sizes[@]}"; do
+                    exp="${expected_sizes[$i]}"
+                    match=""
+                    candidates=0
+
+                    # Exact match pass
+                    for d in "${actual_disks[@]}"; do
+                        [[ "$used" == *" $d "* ]] && continue
+                        if [[ "$(blockdev --getsize64 "$d" 2>/dev/null)" == "$exp" ]]; then
+                            match="$d"
+                            candidates=$((candidates+1))
+                        fi
+                    done
+
+                    if [[ $candidates -eq 1 ]]; then
+                        mapped+=("$match")
+                        used+=" $match "
+                        continue
+                    fi
+
+                    # Ambiguous or missing -> warn and fall back
+                    echo "WARNING: Could not uniquely match disk for expected size $exp (found $candidates exact matches). Falling back to enumeration order." >&2
+                    mapped=()
+                    break
+                done
+
+                if [[ ${#mapped[@]} -gt 0 ]]; then
+                    disks="${mapped[*]}"
+                    hd="${mapped[0]}"
+                    return 0
+                fi
+            fi
+        fi
     else
-        # Auto-select largest available drive
-        hd=$(for d in $devs; do echo "$(blockdev --getsize64 "$d") $d"; done | sort -n | tail -1 | cut -d' ' -f2)
+        if [[ -n $largesize ]]; then
+            # Auto-select largest available drive
+            hd=$(
+                for d in $devs; do
+                    echo "$(blockdev --getsize64 "$d") $d"
+                done | sort -k1,1nr -k2,2 | head -1 | cut -d' ' -f2
+            )
+        else
+            for d in $devs; do
+                hd="$d"
+                break
+            done
+        fi
         [[ -z $hd ]] && handleError "Could not determine a suitable disk automatically."
         disks="$hd"
     fi
